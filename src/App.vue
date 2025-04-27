@@ -3,5 +3,7 @@ import MultiStepForm from '@/components/MultiStepForm.vue'
 </script>
 
 <template>
-  <MultiStepForm />
+    <section>
+      <MultiStepForm />
+    </section>
 </template>

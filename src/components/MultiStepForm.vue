@@ -1,121 +1,158 @@
-<script setup>
-import * as z from 'zod'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { ref, onUnmounted, onMounted } from 'vue'
-import { toTypedSchema } from '@vee-validate/zod'
-import { toast } from 'vue3-toastify';
-import 'vue3-toastify/dist/index.css';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { Stepper, StepperDescription, StepperItem, StepperSeparator, StepperTitle } from '@/components/ui/stepper'
-import { ExclamationCircleIcon, CheckCircleIcon, ArrowPathIcon } from '@heroicons/vue/24/solid'
-import Carouse from '@/components/Carousel.vue'
+<template>
+  <div class="container">
+    <h2>Communicate with Qt Backend</h2>
+    <p>{{ message }}</p>
+    <p>Request Params:{{ params }}</p>
+    <section class="steps">
+      <el-steps :active="stepIndex - 1" finish-status="success" align-center>
+        <el-step
+          v-for="step in steps"
+          :key="step.step"
+          :title="step.title"
+          :description="step.description"
+        ></el-step>
 
+      </el-steps>
+    </section>
+    <section class="form-content" v-if="stepIndex === 1">
+      <div class="title">身份验证</div>
+    </section>
+    <el-form
+      v-if="stepIndex === 1"
+      :model="form"
+      :rules="rules"
+      ref="formRef"
+      label-width="120px"
+      class="form"
+      hide-required-asterisk
+    >
+      <el-form-item label="身份证号" prop="personNo">
+        <el-input v-model="form.personNo" placeholder="请输入身份证号"></el-input>
+      </el-form-item>
+      <el-form-item>
+        <el-button
+          type="primary"
+          @click="submitForm"
+          :loading="isLoading"
+          class="button"
+        >
+          验证
+        </el-button>
+      </el-form-item>
+    </el-form>
+
+    <section v-if="stepIndex === 3" class="section">
+      <Carouse :tradeList="tradeList || []"  :openUrl="handleOpenUrl" />
+    </section>
+    <el-dialog
+      v-model="isDialogOpen"
+      width="500"
+      align-center
+      :close-on-press-escape="false"
+      :close-on-click-modal="false"
+      :show-close="false"
+    >
+      <div v-if="isLoading">
+        <el-icon :size="30" color="#409eff" class="is-loading"><Loading /></el-icon>
+        <h2>核验中</h2>
+        <p>正在核验专家信息和席位信息</p>
+      </div>
+      <div v-if="isChecked">
+        <el-icon :size="30" color="#29bd5d"><SuccessFilled /></el-icon>
+        <h2>核验通过</h2>
+        <p>您的项目评审时间为：{{ expert?.startTime  }} - {{ expert?.sendTime }}</p>
+        <el-button
+          type="primary"
+          @click="sendToQt"
+        >
+          确定({{ countdown }}s)
+        </el-button>
+      </div>
+      <div v-if="isError">
+        <el-icon :size="30" color="#e8aa1a"><WarningFilled /></el-icon>
+        <h2>席位信息不匹配</h2>
+        <p>{{ expert?.expertName }}专家您好，您的席位为：<span class="span">{{ expert?.seatName }} {{expert?.seatCode}}</span>({{ expert?.startTime  }} - {{ expert?.sendTime }})</p>
+        <el-button
+          type="primary"
+          @click="closeError"
+        >
+          取消({{ countdown }}s)
+        </el-button>
+      </div>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, onUnmounted } from 'vue';
+import Carouse from '@/components/Carousel.vue'
 import { venuesExchange, sleep } from '@/api'
 
-const formSchema = [
-  z.object({
-    personNo: z.string({
-      required_error: '请输入身份证号',
-    })
-      .nonempty({ message: '请输入身份证号' })
-      .regex(/^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[0-9Xx]$/, {
-        message: '身份证输入错误'
-      })
-  }),
-]
 
-const stepIndex = ref(1)
+const message = ref('Waiting for Qt backend connection...')
+
+
+const countdown = ref(5);
+let timer = null;
+
 const isDialogOpen = ref(false)
 const isLoading = ref(false)
 const isChecked = ref(false)
 const isError = ref(false)
 
-const countdown = ref(5);
-let timer = null;
-
-const qtObject = ref(null)
-
-const message = ref('Waiting for Qt backend connection...')
 const qtInfo = ref(null)
-
+let qtObject = null
 const expert = ref(null)
+
+const stepIndex = ref(1)
 
 const steps = [
   {
     step: 1,
-    title: '',
-    description: '人证信息核验',
+    title: '人证信息核验',
+    description: '',
   },
   {
     step: 2,
-    title: '',
-    description: '评标席位核验',
+    title: '评标席位核验',
+    description: '',
   },
   {
     step: 3,
-    title: '',
-    description: '已入会',
+    title: '已入会',
+    description: '',
   },
   {
     step: 4,
-    title: '',
-    description: '开始评标',
+    title: '开始评标',
+    description: '',
   },
 ]
 
 const tradeList = ref([])
 
-const toggleDialog = () => {
-  isDialogOpen.value = !isDialogOpen.value
-}
+const form = ref({
+  personNo: '',
+});
+const formRef = ref(null);
 
-// 启动倒计时
-const startCountdown = () => {
-  countdown.value = 5;
-  timer = setInterval(() => {
-    if (countdown.value > 1) {
-      countdown.value--;
+const rules = {
+  personNo: [
+    { required: true, message: '请输入身份证号', trigger: 'blur' },
+    { pattern: /^[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[0-9Xx]$/, message: '身份证输入错误', trigger: 'blur' },
+  ],
+};
+
+const submitForm = () => {
+  formRef.value.validate((valid) => {
+    if (valid) {
+      checkedInfo(form.value);
     } else {
-      if (isChecked.value) {
-        sendToQt()
-      }
-      if (isError.value) {
-        closeError()
-      }
+      return false;
     }
-  }, 1000);
-};
-const startCountdownFix = (systemAutoUrl) => {
-  countdown.value = 5;
-  timer = setInterval(() => {
-    if (countdown.value > 1) {
-      countdown.value--;
-    } else if(countdown.value === 1) {
-      if(systemAutoUrl) {
-        // 打开地址
-        stepIndex.value = 2;
-        isDialogOpen.value = false;
-      } else {
-        // 打开列表
-        stepIndex.value = 3;
-        isDialogOpen.value = false;
-      }
-    }
-  }, 1000);
+  });
 };
 
-// 手动关闭错误信息
-const closeError = () => {
-  clearInterval(timer);
-  isError.value = false;
-  isDialogOpen.value = false;
-  stepIndex.value = 1;
-};
-
-const onSubmit = (values) => {
-  console.log('JSON.stringify(values, null, 2)', JSON.stringify(values, null, 2))
-}
 const params =ref(null)
 const checkedInfo = async (values) => {
   stepIndex.value = 2;
@@ -125,7 +162,7 @@ const checkedInfo = async (values) => {
   params.value = {
     userCode: qtInfo?.value?.userCode || "userCode",
     meetingId: qtInfo?.value?.meetingId || "meetingId",
-    host: qtInfo?.value?.serverHost ? `${qtInfo?.value?.serverHost}:${qtInfo?.value?.serverPort}` : ''
+    host: qtInfo?.value?.serverHost ? `${qtInfo?.value?.serverHost.indexOf('http') !== '-1' ? qtInfo?.value?.serverHost : 'http://'+qtInfo?.value?.serverHost}:${qtInfo?.value?.serverPort || '80'}` : ''
   };
 
   try {
@@ -133,7 +170,7 @@ const checkedInfo = async (values) => {
     //   userCode: qtInfo?.value?.userCode || "",
     //   meetingId: qtInfo?.value?.meetingId || "",
     //   idCard: values.personNo || ''
-    // }, qtInfo?.value?.serverHost ? `${qtInfo?.value?.serverHost}:${qtInfo?.value?.serverPort}` : '');
+    // }, qtInfo?.value?.serverHost ? `${qtInfo?.value?.serverHost.indexOf('http') !== '-1' ? qtInfo?.value?.serverHost : 'http://'+qtInfo?.value?.serverHost}:${qtInfo?.value?.serverPort || '80'}` : '');
 
     const res = {
       success: true,
@@ -143,22 +180,78 @@ const checkedInfo = async (values) => {
         expertName:"",
         seatCode:"",
         seatName:"",
-        startTine:"",
-        endTine:"",
+        startTime:"2025-01-01 11:00:00",
+        sendTime:"2025-01-01 12:00:00",
+        endTime:"",
         systemUrls: [
           {
-            tradeCenterName:"交易中心",// 交易中心
-            systemUrl:"https://www.baidu.com/", // 系统地址
-            systemName:"系统名称" // 系统名称
-          }
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
+          {
+            tradeCenterName:"交易中心",
+            systemUrl:"https://www.baidu.com/",
+            systemName:"系统名称"
+          },
         ],
-        systemAutoUrl:"" // 客户端设置为自动打开地址时，对应系统地址
+        systemAutoUrl:""
       }
     }
 
     if (!res.data) {
       await sleep(800);
-      toast.error(res.message)
+      ElMessage.error(res.message)
       isDialogOpen.value = false;
       isLoading.value = false;
       stepIndex.value = 1;
@@ -186,10 +279,57 @@ const checkedInfo = async (values) => {
     isDialogOpen.value = false;
     isError.value = false;
     stepIndex.value = 1;
-    toast.error(err.message || '网络异常，请稍后再试！');
+    ElMessage.error(err.message || '网络异常，请稍后再试！');
   }
 };
+// 启动倒计时
+const startCountdown = () => {
+  countdown.value = 5;
+  timer = setInterval(() => {
+    if (countdown.value > 1) {
+      countdown.value--;
+    } else {
+      if (isChecked.value) {
+        sendToQt()
+      }
+      if (isError.value) {
+        closeError()
+      }
+    }
+  }, 1000);
+};
 
+const startCountdownFix = (systemAutoUrl) => {
+  countdown.value = 5;
+  timer = setInterval(() => {
+    if (countdown.value > 1) {
+      countdown.value--;
+    } else if (countdown.value === 1) {
+      isDialogOpen.value = false;
+      if (systemAutoUrl) {
+        // 打开地址
+        stepIndex.value = 2;
+        clearInterval(timer);
+        if (qtObject) {
+          qtObject.pageClosing(systemAutoUrl);
+        }
+      } else {
+        // 打开列表
+        stepIndex.value = 3;
+      }
+    }
+  }, 1000);
+};
+
+// 手动关闭错误信息
+const closeError = () => {
+  clearInterval(timer);
+  isError.value = false;
+  isDialogOpen.value = false;
+  stepIndex.value = 1;
+};
+
+// 发送信息到Qt
 const sendToQt = () => {
   clearInterval(timer);
   isDialogOpen.value = false;
@@ -198,192 +338,92 @@ const sendToQt = () => {
   if(expert.value.systemAutoUrl) {
     // 打开地址
     stepIndex.value = 2;
-    if (qtObject.value) {
-      const msg = "shutdown server";
-      qtObject.value.CallQtFuc(msg); // 调用C++的槽函数
+    if (qtObject) {
+      qtObject.pageClosing(expert.value.systemAutoUrl);
     }
   } else {
     // 打开列表
     stepIndex.value = 3;
   }
-
 }
 
 const handleOpenUrl = (url) => {
-  if (qtObject.value) {
-    const msg = "shutdown server";
-    qtObject.value.CallQtFuc(msg); // 调用C++的槽函数
+  if (qtObject) {
+    qtObject.pageClosing(url);
   }
 };
 
-// 初始化 QWebChannel
 const initQWebChannel = () => {
-  if (typeof QWebChannel !== 'undefined' || !qt || !qt.webChannelTransport) {
     const qWebChannel = new QWebChannel(qt.webChannelTransport, (channel) => {
-      // 获取 Qt 后端暴露的对象
-      qtObject.value = channel.objects.bidJSObject
+      qtObject = channel.objects.bidJSObject;
+      qtObject.CallQtFuc((msg) => {
+        message.value = `Message from Qt: ${msg}`;
+        qtInfo.value = JSON.parse(msg);
+      });
+    });
+};
 
-      // 监听 Qt 后端发送的消息
-      qtObject.value.CallQtFuc.connect((msg) => {
-        message.value = `Message from Qt: ${msg}`
-        qtInfo.value = msg
-      })
-    })
-  } else {
-    console.error('QWebChannel is not defined!')
-  }
-}
-// 组件挂载时初始化 QWebChannel
 onMounted(() => {
   try {
-    initQWebChannel()
+    initQWebChannel();
   } catch (error) {
-    console.error('Failed to initialize QWebChannel:', error)
+    console.error('Failed to initialize QWebChannel:', error);
   }
-})
+});
 
 onUnmounted(() => {
   clearInterval(timer);
 });
 
 </script>
+<style scoped>
+.steps {
+  width: 800px;
+  margin: 0 auto 50px;
+}
+.form {
+  width: 700px;
+  padding-right: 120px;
+  margin: 0 auto;
+}
 
-<template>
-  <section class="my-10">
-    <h2>Communicate with Qt Backend</h2>
-    <p>{{ message }}</p>
-  </section>
+/* 修改步骤条的图标颜色 */
+:deep(.is-process .el-step__icon) {
+  background-color: #409eff;
+  color: #fff;
+  border: 2px solid rgba(64, 158, 255, 0.1);
+  box-shadow: 0 0 10px 0 #409eff;
+}
 
-  <Form
-    v-slot="{ meta, values, validate }"
-    as=""
-    keep-values
-    :validation-schema="stepIndex === 1 && toTypedSchema(formSchema[stepIndex - 1])"
-  >
-    <Stepper
-      v-slot="{ isNextDisabled, isPrevDisabled, nextStep, prevStep }"
-      v-model="stepIndex"
-      class="flex w-full justify-center items-center"
-    >
-      <form
-        @submit="(e) => {
-          e.preventDefault()
-          validate()
-        }"
-      >
-        <div class="flex w-[800px] gap-2 items-center justify-center">
-          <StepperItem
-            v-for="step in steps"
-            :key="step.step"
-            v-slot="{ state }"
-            class="relative flex w-full flex-col items-center justify-center"
-            :step="step.step"
-            :disabled="true"
-          >
-            <StepperSeparator
-              v-if="step.step !== steps[steps.length - 1].step"
-              class="absolute left-[calc(50%+20px)] right-[calc(-50%+10px)] top-5 block h-0.5 shrink-0 rounded-full group-data-[state=completed]:bg-green-600/80"
-            />
 
-            <Button
-              :variant="state === 'completed' || state === 'active' ? 'default' : 'outline'"
-              size="icon"
-              class="z-10 rounded-full shrink-0"
-              :class="[state === 'active' ? 'ring-blue-600/20 ring-4  bg-blue-600/80 hover:bg-blue-600/80' : 'group-data-[state=completed]:bg-green-600/80 group-data-[state=completed]:hover:bg-green-600/80']"
-            >
-              {{ step.step }}
-            </Button>
+/* 修改步骤条的标题颜色 */
+:deep(.is-process.el-step__title) {
+  color: #409eff;
+  font-size: 18px;
+  font-weight: normal;
+}
 
-            <div class="mt-5 flex flex-col items-center text-center">
-              <StepperTitle
-                :class="[state === 'active' && 'text-primary']"
-                class="text-sm font-semibold transition lg:text-base text-blue-600/80"
-              >
-                {{ step.title }}
-              </StepperTitle>
-              <StepperDescription
-                :class="{
-                    'sr-only text-xs text-muted-foreground transition md:not-sr-only lg:text-sm group-data-[state=active]:text-blue-600/80 group-data-[state=completed]:text-green-600/80': true
-                }"
-              >
-                {{ step.description }}
-              </StepperDescription>
-            </div>
-          </StepperItem>
-        </div>
+.form-content {
+  width: 800px;
+  margin: 0 auto 30px;
+}
 
-        <div class="flex flex-col gap-4 mt-4">
-          <template v-if="stepIndex === 1">
-            <FormField
-              v-slot="{ componentField, errors }"
-              name="personNo"
-            >
-              <section class="flex justify-center items-center">
-                <div class="text-center text-blue-600/80 my-4 py-2 px-4 border-b-[2px] border-blue-600/80">
-                  身份验证
-                </div>
-              </section>
-              <FormItem>
-                <div class="flex items-center">
-                  <FormLabel class="w-18 text-right">身份证号:</FormLabel>
-                  <FormControl>
-                    <Input type="text" class="flex-1" v-bind="componentField" />
-                  </FormControl>
-                </div>
-                <div class="flex items-center">
-                <FormMessage v-if="errors.length" class="text-red-500 text-sm pl-[78px]">
-                  {{ errors[0] }}
-                </FormMessage>
-                </div>
-              </FormItem>
-            </FormField>
-            <div class="flex items-center justify-center mt-4">
-              <div class="flex items-center justify-center gap-3">
-                <Button class="w-[200px] cursor-pointer bg-blue-600/80 hover:bg-blue-600/80" :type="meta.valid ? 'button' : 'submit'" @click="meta.valid && checkedInfo(values)">
-                  验证
-                </Button>
-              </div>
-            </div>
-          </template>
+.button {
+  width: 100%;
+}
+.span {
+  color: #409eff;
+}
 
-          <section v-if="stepIndex === 3" class="w-[800px] my-10">
-            <Carouse :tradeList="tradeList || []"  :openUrl="handleOpenUrl" />
-          </section>
-        </div>
-      </form>
-    </Stepper>
-  </Form>
-  <div v-if="isDialogOpen" class="fixed inset-0 z-50 flex items-center justify-center">
-    <div class="absolute inset-0 bg-black" :style="{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }"></div>
-    <div class="relative z-10 bg-white rounded-lg shadow-lg p-6 max-w-md w-full p-8">
-
-      <div v-if="isLoading">
-        <section class="flex justify-center items-center my-2 "><ArrowPathIcon class="size-8 text-blue-500" /></section>
-        <h2 class="text-lg mb-4">核验中</h2>
-        <p class="text-gray-700">正在核验专家信息和席位信息</p>
-      </div>
-      <div v-if="isChecked">
-        <section class="flex justify-center items-center my-2"><CheckCircleIcon class="size-10 text-green-500" /></section>
-        <h2 class="text-lg mb-4">核验通过</h2>
-        <p class="text-gray-700">您的项目评审时间为：{{ expert.startTine  }} - {{ expert.endTine }}</p>
-        <Button class="w-[100px] cursor-pointer bg-blue-600/80 hover:bg-blue-600/80 mt-8" type="button" size="sm" @click="sendToQt">
-          确定({{ countdown }}s)
-        </Button>
-      </div>
-      <div v-if="isError">
-        <section class="flex justify-center items-center my-2"><ExclamationCircleIcon class="size-10 text-yellow-500" /></section>
-        <h2 class="text-lg mb-4">席位信息不匹配</h2>
-        <p class="text-gray-700">{{ expert.expertName }}专家您好，您的席位为：<span class="text-blue-600">{{ expert.seatName }} {{expert.seatCode}}</span>({{ expert.startTine  }} - {{ expert.endTine }})</p>
-        <Button
-          class="w-[100px] cursor-pointer bg-gray-600/80 hover:bg-gray-600/80 mt-8"
-          type="button"
-          size="sm"
-          @click="closeError"
-        >
-          取消({{ countdown }}s)
-        </Button>
-      </div>
-    </div>
-  </div>
-
-</template>
+.title {
+  padding: 10px 30px;
+  border-bottom:2px solid #409eff;
+  display: inline-block;
+  color: #409eff;
+}
+.section {
+  width: 800px;
+  margin: 10px auto;
+  text-align: center;
+}
+</style>
