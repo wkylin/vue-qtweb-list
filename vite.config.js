@@ -60,7 +60,7 @@ export default defineConfig(({ mode }) => {
             proxy.on('proxyRes', (proxyRes, req, res) => {
               const realUrl = new URL(res.url, options.target).href;
               proxyRes.headers['x-real-url'] = realUrl;
-              console.log('[Proxy] Updated Headers:', proxyRes.headers['x-real-url']);
+              console.log('[Proxy] Response Headers:', proxyRes.headers['x-real-url']);
             })
           }
         },
