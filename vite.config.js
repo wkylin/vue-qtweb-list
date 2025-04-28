@@ -40,16 +40,29 @@ export default defineConfig(({ mode }) => {
       },
     },
     // build: {
-    //   // target: 'es2015',
+    //   target: 'es2015',
     //   cssTarget: 'chrome52'
     // },
     server: {
       host: '0.0.0.0',
       proxy: {
         '/video': {
-          target: 'http://10.0.107.154',
+          target: 'http://localhost:8080',
           changeOrigin: true,
-          // rewrite: (path) => path.replace(/^\/venues/, ''), // 重写路径，去掉 /api 前缀
+          // rewrite: (path) => path.replace(/^\/video/, ''), // 重写路径，去掉 /api 前缀
+          configure: (proxy, options) => {
+            proxy.on('proxyReq', (proxyReq, req, res) => {
+              const realUrl = new URL(req.url, options.target).href;
+              proxyReq.setHeader('x-real-url', realUrl);
+              const updatedHeaders = proxyReq.getHeaders();
+              console.log('[Proxy] Updated Headers:', updatedHeaders['x-real-url']);
+            })
+            proxy.on('proxyRes', (proxyRes, req, res) => {
+              const realUrl = new URL(res.url, options.target).href;
+              proxyRes.headers['x-real-url'] = realUrl;
+              console.log('[Proxy] Updated Headers:', proxyRes.headers['x-real-url']);
+            })
+          }
         },
       },
     },

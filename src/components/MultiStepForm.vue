@@ -86,7 +86,8 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 import Carouse from '@/components/Carousel.vue'
-import { venuesExchange, sleep } from '@/api'
+// import { venuesExchange, sleep } from '@/api'
+import { sleep } from '@/api'
 
 
 const message = ref('Waiting for Qt backend connection...')
